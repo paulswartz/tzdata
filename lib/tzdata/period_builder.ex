@@ -9,7 +9,7 @@ defmodule Tzdata.PeriodBuilder do
   @max_year (:calendar.universal_time|>elem(0)|>elem(0)) + @years_in_the_future_where_precompiled_periods_are_used + @extra_years_to_precompile
 
   def calc_periods(btz_data, zone_name) do
-    calc_periods_h(btz_data, zone_name) |> Enum.filter(fn(x) -> (x != nil) end)
+    calc_periods_h(btz_data, zone_name) |> Enum.reject(&is_nil/1)
   end
   defp calc_periods_h(btz_data, zone_name) do
     {:ok, zone} = zone(btz_data, zone_name)
@@ -145,6 +145,8 @@ defmodule Tzdata.PeriodBuilder do
     if rules_for_year == [] do
       calc_rule_periods(btz_data, zone_lines, from, utc_off, std_off, years_tl, zone_rules, letter)
     else
+      # if we don't have an existing letter for this year, grab the one from the end of last year
+      letter = if letter == "", do: List.last(rules_for_year).letter, else: letter
       calc_periods_for_year(btz_data, zone_lines, from, utc_off, std_off, [years_hd|years_tl], zone_rules, rules_for_year, letter)
     end
   end
@@ -155,7 +157,9 @@ defmodule Tzdata.PeriodBuilder do
     rules_tail = rules_for_year |> tl
     from_standard_time = standard_time_from_utc(from, utc_off)
     from_wall_time = wall_time_from_utc(from, utc_off, std_off)
-    until_utc = datetime_to_utc(TzUtil.time_for_rule(rule, year), utc_off, std_off)
+    year_based_until = datetime_to_utc(TzUtil.time_for_rule(rule, year), utc_off, std_off)
+    zone_based_until = datetime_to_utc(Map.get(zone_line, :until), utc_off, std_off)
+    until_utc = min(year_based_until, zone_based_until)
     until_standard_time = standard_time_from_utc(until_utc, utc_off)
     until_wall_time = wall_time_from_utc(until_utc, utc_off, std_off)
 
@@ -170,17 +174,22 @@ defmodule Tzdata.PeriodBuilder do
                 from: %{utc: from, wall: from_wall_time, standard: from_standard_time},
                 until: %{standard: until_standard_time, wall: until_wall_time, utc: until_utc},
                 zone_abbr: TzUtil.period_abbrevation(zone_line.format, std_off, letter)
-              }
-    # If there are no more rules for the year, continue with the next zone line
-    if rules_tail == [] do
-      [period |
-       calc_rule_periods(btz_data, [zone_line|zone_line_tl], until_utc, utc_off, rule.save, years|>tl, zone_rules, rule.letter)
-      ]
-    # Else continue with those rules
-    else
-      [period|
-       calc_periods_for_year(btz_data, [zone_line|zone_line_tl], until_utc, utc_off, rule.save, years, zone_rules, rules_tail, rule.letter)
-      ]
+          }
+
+    cond do
+      rules_tail == [] ->
+        # If there are no more rules for the year, continue with the next zone line
+        [period |
+         calc_rule_periods(btz_data, [zone_line|zone_line_tl], until_utc, utc_off, rule.save, years|>tl, zone_rules, rule.letter)
+        ]
+      until_utc == zone_based_until ->
+        # the rule based engine ended: go back to the regular engines
+        [period | calc_periods(btz_data, zone_line_tl, until_utc, hd(zone_line_tl).rules, letter)]
+      true ->
+        # Else continue with those rules
+        [period|
+         calc_periods_for_year(btz_data, [zone_line|zone_line_tl], until_utc, utc_off, rule.save, years, zone_rules, rules_tail, rule.letter)
+        ]
     end
   end
 

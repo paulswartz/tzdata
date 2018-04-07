@@ -46,14 +46,14 @@ defmodule TzPeriodBuilderTest do
        until: %{standard: 61322666400, wall: 61322666400, utc: 61322662800},
        utc_off: 3600, zone_abbr: "CET"}
 
-     # Twentyfirst period. Wintertime from 1948 to 1980
-    assert prds |> Enum.at(20) == %{std_off: 0,
+     # Eighteenth period. Wintertime from 1945 to 1980
+    assert prds |> Enum.at(18) == %{std_off: 0,
        from: %{standard: 61491924000, wall: 61491924000, utc: 61491920400},
        until: %{standard: 62482752000, wall: 62482752000, utc: 62482748400},
        utc_off: 3600, zone_abbr: "CET"}
 
-     # Twentyseventh period. Summertime in 1982
-    assert prds |> Enum.at(26) == %{std_off: 3600,
+     # Twentyfourth period. Summertime in 1982
+    assert prds |> Enum.at(24) == %{std_off: 3600,
        from: %{standard: 62553348000, wall: 62553351600, utc: 62553344400},
        until: %{standard: 62569072800, wall: 62569076400, utc: 62569069200},
        utc_off: 3600, zone_abbr: "CEST"}
@@ -90,5 +90,21 @@ defmodule TzPeriodBuilderTest do
     periods = TzPeriodBuilder.calc_periods(map, "Africa/Ceuta")
     assert periods |> Enum.at(5) == %{from: %{standard: 60724767600, utc: 60724767600, wall: 60724771200}, std_off: 3600,
              until: %{standard: 60739542000, utc: 60739542000, wall: 60739545600}, utc_off: 0, zone_abbr: "WEST"}
+  end
+
+  test "calculates correct abbreviation when changing from a static offset" do
+    {:ok, map} = Tzdata.BasicDataMap.from_files_in_dir(@source_data_dir)
+    periods = TzPeriodBuilder.calc_periods(map, "America/Chihuahua")
+    # changed from static CST to CST/CDT at the start of 1996
+    assert %{zone_abbr: "CST"} = periods |> Enum.at(7)
+  end
+
+  test "calculate periods for zone where there are multiple changes within a year" do
+    {:ok, map} = Tzdata.BasicDataMap.from_files_in_dir(@source_data_dir)
+    periods = TzPeriodBuilder.calc_periods(map, "America/Chihuahua")
+    # changed from CST/CDT back to CST at the start of 1998, then to MST/MDT
+    # at the end of 1998
+    assert %{until: %{utc: 63050853600}} = Enum.at(periods, 11)
+    assert %{from: %{utc: 63050853600}} = Enum.at(periods, 12)
   end
 end
